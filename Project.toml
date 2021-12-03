@@ -3,6 +3,9 @@ uuid = "6088ff20-74c6-4044-b5d5-b0edd2c291ce"
 authors = ["Andreas Tell <atell@soundtheory.com> and contributors"]
 version = "0.1.0"
 
+[deps]
+Plots = "91a5bcdd-55d7-5caf-9e0b-520d859cae80"
+
 [compat]
 julia = "1.6"
 
