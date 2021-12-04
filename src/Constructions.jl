@@ -2,9 +2,11 @@ module Constructions
 
 export Construction
 export dependency_order
-export place, modify
-export construct
-export replace, remove
+export @place
+export @modify
+export @construct
+export @replace
+export @remove
 
 
 abstract type AbstractGeometricElement end
