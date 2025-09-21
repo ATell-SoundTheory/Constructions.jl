@@ -12,6 +12,12 @@ Makie makes it easy to bind geometry to reactive Observables and add sliders/dra
   - Web: `using WGLMakie; WGLMakie.activate!(); include("examples/interactive_triangle_makie.jl")`
 - You can save a self-contained HTML via WGLMakie: `save("interactive_triangle.html", fig)`.
 
+### Try it online
+
+If the docs build generated the demo, you can open the interactive HTML here:
+
+- Interactive triangle demo (WGLMakie): [assets/interactive_triangle.html](assets/interactive_triangle.html)
+
 ## Pluto.jl notebooks
 
 Pluto gives you reactive cells and sliders (PlutoUI.jl) with no callbacks. A Pluto version mirrors the same triangle example:
