@@ -16,7 +16,7 @@ Makie makes it easy to bind geometry to reactive Observables and add sliders/dra
 
 If the docs build generated the demo, you can open the interactive HTML here:
 
-- Interactive triangle demo (WGLMakie): [assets/interactive_triangle.html](assets/interactive_triangle.html)
+- Interactive triangle demo (WGLMakie): [assets/interactive_triangle/index.html](assets/interactive_triangle/index.html)
 
 ## Pluto.jl notebooks
 

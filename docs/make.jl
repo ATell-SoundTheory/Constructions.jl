@@ -592,7 +592,9 @@ function render_interactive_assets()
     assetsdir = joinpath(@__DIR__, "src", "assets")
     mkpath(assetsdir)
     # Compute output path up front for interpolation into @eval block
-    out_path = joinpath(assetsdir, "interactive_triangle.html")
+    out_dir = joinpath(assetsdir, "interactive_triangle")
+    mkpath(out_dir)
+    out_path = joinpath(out_dir, "index.html")
     try
         # Wrap everything in @eval so that no Makie names/macros are resolved
         # at parse time; only if Makie/WGLMakie load successfully will this run.
@@ -625,8 +627,21 @@ function render_interactive_assets()
             Makie.scatter!(ax, C; color=:black, markersize=10)
             Makie.scatter!(ax, G; color=:red, markersize=12)
 
-            # Save a self-contained HTML (pan/zoom interactivity)
-            Makie.save($out_path, fig)
+            # Export interactive app with bundled assets into a folder for GitHub Pages
+            try
+                import Bonito
+                let out = $out_path
+                    local dir = dirname(out)
+                    local file = basename(out)
+                    cd(dir) do
+                        # offline=true bundles Bonito JS and binary assets into ./bonito/
+                        Bonito.save(file, fig; offline=true)
+                    end
+                end
+            catch e
+                @warn "Failed to export interactive app; writing static PNG snapshot instead" err=e
+                Makie.save(joinpath(dirname($out_path), "snapshot.png"), fig)
+            end
         end
     catch e
         # Makie/WGLMakie not available or render failed; log and skip
