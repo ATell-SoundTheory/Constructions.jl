@@ -627,15 +627,19 @@ function render_interactive_assets()
             Makie.scatter!(ax, C; color=:black, markersize=10)
             Makie.scatter!(ax, G; color=:red, markersize=12)
 
-            # Export interactive app with bundled assets into a folder for GitHub Pages
+            # Export interactive app as a standalone HTML for GitHub Pages
             try
-                import Bonito
                 let out = $out_path
                     local dir = dirname(out)
                     local file = basename(out)
                     cd(dir) do
-                        # offline=true bundles Bonito JS and binary assets into ./bonito/
-                        Bonito.save(file, fig; offline=true)
+                        # Prefer WGLMakie.save with a standalone bundle (no external .julia paths)
+                        try
+                            WGLMakie.save(file, fig; standalone=true)
+                        catch e1
+                            # Fallback: try without keyword (older/newer APIs)
+                            WGLMakie.save(file, fig)
+                        end
                     end
                 end
             catch e
