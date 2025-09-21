@@ -612,7 +612,7 @@ function render_interactive_assets()
             Mca = Makie.lift((c,a) -> Makie.Point2f((c[1]+a[1])/2, (c[2]+a[2])/2), C, A)
             G   = Makie.lift((a,b,c) -> Makie.Point2f((a[1]+b[1]+c[1])/3, (a[2]+b[2]+c[2])/3), A, B, C)
 
-            fig = Makie.Figure(resolution=(800, 560))
+            fig = Makie.Figure(size=(800, 560))
             ax = Makie.Axis(fig[1, 1], aspect=Makie.DataAspect(),
                             xgridvisible=false, ygridvisible=false,
                             limits=((-2,2),(-2,2)))
@@ -629,17 +629,13 @@ function render_interactive_assets()
 
             # Export interactive app as a standalone HTML for GitHub Pages
             try
+                import Bonito
                 let out = $out_path
                     local dir = dirname(out)
                     local file = basename(out)
                     cd(dir) do
-                        # Prefer WGLMakie.save with a standalone bundle (no external .julia paths)
-                        try
-                            WGLMakie.save(file, fig; standalone=true)
-                        catch e1
-                            # Fallback: try without keyword (older/newer APIs)
-                            WGLMakie.save(file, fig)
-                        end
+                        # Use Bonito to export a single-file static HTML to index.html
+                        Bonito.export_static(file, Bonito.App(fig))
                     end
                 end
             catch e
