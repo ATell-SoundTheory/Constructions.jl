@@ -9,6 +9,4 @@ Documentation for [Constructions](https://github.com/ATell-SoundTheory/Construct
 ```@index
 ```
 
-```@autodocs
-Modules = [Constructions]
-```
+See the Quickstart and API pages for usage and reference.

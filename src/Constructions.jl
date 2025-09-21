@@ -1,4 +1,42 @@
+"""
+        Constructions
+
+Minimal dependency-graph framework for named constructions.
+
+Core concepts
+- `Construction`: container of named elements (strings) mapped to either
+    - `PlacedElement`: concrete values provided by the user
+    - `ConstructedElement`: values produced by a rule (function) with dependencies
+
+Updating
+- Changing a placed element triggers recomputation of all downstream constructed elements
+    in a safe topological order.
+- Removing an element cascades removal of dependents.
+- Cycles in dependencies are detected and reported via `ConstructionsError`.
+
+Access and ergonomics
+- Access a value by name with `C["S"]`.
+- Macros provide a concise DSL: `@place`, `@construct`, `@modify`, `@replace`, `@remove`.
+
+Error behavior
+- Duplicate names: `ArgumentError`
+- Unknown dependencies/names: `ArgumentError`
+- Failed construction rule: `ArgumentError` (on creation) or `ConstructionsError` (on update)
+- Cycles: `ConstructionsError`
+"""
 module Constructions
+"""
+    ConstructionsError(msg)
+
+Custom exception type raised for construction-graph runtime errors like cycles
+or stalled updates during recomputation.
+"""
+struct ConstructionsError <: Exception
+    msg::String
+end
+
+Base.showerror(io::IO, e::ConstructionsError) = print(io, e.msg)
+
 
 export Construction
 export dependency_order
@@ -9,14 +47,42 @@ export @replace
 export @remove
 
 
+"""
+Abstract supertype for elements stored in a `Construction`.
+
+- `PlacedElement`: user-provided value
+- `ConstructedElement`: value computed from a rule and dependencies
+"""
 abstract type AbstractGeometricElement end
 
+"""
+    PlacedElement
+
+Holds a concrete value bound to a name within a `Construction`.
+
+Fields
+- `name::String`
+- `representation::Any` – user value
+- `required_by::Set{String}` – names that depend on this element
+"""
 struct PlacedElement <: AbstractGeometricElement
     name::String
     representation::Any
     required_by::Set{String}
 end
 
+"""
+    ConstructedElement
+
+Holds a computed value along with its dependency set and construction rule.
+
+Fields
+- `name::String`
+- `representation::Any`
+- `required_by::Set{String}` – dependents
+- `requires::Set{String}` – dependencies
+- `construct::Function` – `C -> value` rule
+"""
 struct ConstructedElement <: AbstractGeometricElement
     name::String
     representation::Any
@@ -43,6 +109,12 @@ replace_required_by(g::PlacedElement, new_required_by) = PlacedElement(name(g), 
 
 replace_required_by(g::ConstructedElement, new_required_by) = ConstructedElement(name(g), representation(g), new_required_by, requires(g), construct(g))
 
+"""
+    Construction()
+
+Container mapping names (`String`) to elements and providing dependency-aware
+updates and access.
+"""
 struct Construction
     elements::Dict{String,AbstractGeometricElement}
 end
@@ -50,11 +122,20 @@ end
 Construction() = Construction(Dict{String,AbstractGeometricElement}())
 
 
+"""
+    dependency_order(C::Construction) -> Vector{String}
+
+Return a topological ordering of element names such that all dependencies
+precede their dependents. Throws `ConstructionsError` if a dependency cycle exists.
+"""
 function dependency_order(C::Construction)
     result = String[]
     elements = Set(keys(C.elements))
     while !isempty(elements)
         free_elements = filter(e -> isdisjoint(requires(C.elements[e]), elements), elements)
+        if isempty(free_elements)
+            throw(ConstructionsError("Dependency cycle detected among: $(collect(elements))"))
+        end
         append!(result, free_elements)
         setdiff!(elements, free_elements)
     end
@@ -64,6 +145,13 @@ end
 
 import Base.show
 
+"""
+    show(io, C::Construction)
+
+Pretty-print the construction in dependency order. Placed elements show as
+`name: value;` and constructed elements as `{deps...} => name: value;`.
+Non-throwing.
+"""
 function show(io::IO, C::Construction)
     for en in dependency_order(C)
         e = C.elements[en]
@@ -82,6 +170,12 @@ end
 
 import Base.getindex
 
+"""
+    C[ename::String]
+
+Return the `representation` bound to the given name, or throw `ArgumentError`
+if no such element exists.
+"""
 function getindex(C::Construction, ename::String)
     if !haskey(C.elements, ename)
         throw(ArgumentError("Element $ename not found."))
@@ -99,15 +193,15 @@ function is_placed(element)
     element isa PlacedElement
 end
 
-function representation(ename::String)
-    if !haskey(C.elements, ename)
-        throw(ArgumentError("Element $ename not found."))
-    else
-        representation(C.elements[ename])
-    end
-end
+## NOTE: representation(::String) without a Construction is ambiguous and was removed.
 
 
+"""
+    place_element!(C, ename::String, value) -> nothing
+
+Insert a new placed element named `ename` with the given value. Throws
+`ArgumentError` if `ename` already exists.
+"""
 function place_element!(C::Construction, ename::String, representation )
     if haskey(C.elements, ename)
         throw(ArgumentError("Name $ename is already used in the construction."))
@@ -118,6 +212,13 @@ function place_element!(C::Construction, ename::String, representation )
 end
 
 
+"""
+    construct_element!(C, ename::String, rule::Function, deps::Set{String}) -> nothing
+
+Insert a new constructed element named `ename`, produced by `rule(C)` and
+depending on `deps`. Throws `ArgumentError` for duplicate names or unknown deps.
+If `rule(C)` throws, the creation fails with `ArgumentError`.
+"""
 function construct_element!(C::Construction, ename::String, construct::Function, depends_on::Set{String})
     if haskey(C.elements, ename)
         throw(ArgumentError("Name $ename is already used in the construction."))
@@ -138,6 +239,12 @@ function construct_element!(C::Construction, ename::String, construct::Function,
 end
 
 
+"""
+    collect_dependencies(C, ename, result::Set{String}) -> Set{String}
+
+Populate `result` with all transitive dependents of `ename` (names that require
+it), guarding against cycles.
+"""
 function collect_dependencies(C::Construction, ename::String, result::Set{String})
     if !haskey(C.elements, ename)
         throw(ArgumentError("Element $ename not found."))
@@ -145,31 +252,52 @@ function collect_dependencies(C::Construction, ename::String, result::Set{String
         followingelements = required_by(C.elements[ename])
         union!(result, followingelements)
         for e in followingelements
-            push!(result, e)
-            collect_dependencies(C, e, result)
+            # only recurse into nodes we haven't visited yet to avoid cycles
+            if !(e in result)
+                push!(result, e)
+                collect_dependencies(C, e, result)
+            end
         end
     end
     result
 end
 
 
+"""
+    update_dependencies!(C, ename, requires_elements, required_by_elements) -> nothing
+
+Recompute constructed elements affected by a change to `ename` in a safe order.
+On deletion, detach `ename` from its prerequisites, remove its dependents, and
+propagate recursively. Detects cycles during recomputation and throws
+`ConstructionsError` if progress stalls or a rule fails during update.
+"""
 function update_dependencies!(C::Construction, ename::String, requires_elements::Set{String}, required_by_elements::Set{String})
     if haskey(C.elements, ename)
         # element has been updated but the dependencies have not changed
         affectedelements = collect_dependencies(C, ename, Set{String}() )
         while !isempty(affectedelements)
-            for ae in affectedelements
+            progressed = false
+            to_remove = String[]
+            # iterate over a stable snapshot to avoid mutating during iteration
+            for ae in copy(affectedelements)
                 element = C.elements[ae]
                 if isdisjoint(requires(element), affectedelements)
                     if element isa ConstructedElement
                         try
                             C.elements[ae] = replace_representation(element, element.construct(C))
                         catch err
-                            throw(ErrorException("Construction rule failed with error $err."))
+                            throw(ConstructionsError("Construction rule failed with error $err."))
                         end
                     end
-                    delete!(affectedelements, ae)
+                    push!(to_remove, ae)
+                    progressed = true
                 end
+            end
+            for ae in to_remove
+                delete!(affectedelements, ae)
+            end
+            if !progressed
+                throw(ConstructionsError("Dependency update stalled (cycle or missing inputs) while updating $(ename): $(collect(affectedelements))"))
             end
         end
     else
@@ -191,6 +319,12 @@ function update_dependencies!(C::Construction, ename::String, requires_elements:
 end
 
 
+"""
+    modify_placed_element!(C, ename::String, newvalue) -> nothing
+
+Change the value of a placed element and trigger recomputation downstream.
+Throws `ArgumentError` if `ename` is not found or is a constructed element.
+"""
 function modify_placed_element!(C::Construction, ename::String, newrepresentation)
     if !haskey(C.elements, ename)
         throw(ArgumentError("Element $ename not found."))
@@ -207,6 +341,12 @@ function modify_placed_element!(C::Construction, ename::String, newrepresentatio
 end
 
 
+"""
+    remove_element!(C, ename::String) -> nothing
+
+Remove an element and recursively remove all of its dependents.
+Throws `ArgumentError` if the name is not found.
+"""
 function remove_element!(C::Construction, ename::String)
     if !haskey(C.elements, ename)
         throw(ArgumentError("Element $ename not found."))
@@ -219,6 +359,12 @@ function remove_element!(C::Construction, ename::String)
 end
 
 
+"""
+    replace_element!(C, ename::String, value) -> nothing
+
+Replace an element by a placed element with the given value, preserving
+its dependents and triggering recomputation downstream.
+"""
 function replace_element!(C::Construction, ename::String, representation)
     if !haskey(C.elements, ename)
         throw(ArgumentError("Element $ename not found."))
@@ -238,6 +384,13 @@ function replace_element!(C::Construction, ename::String, representation)
 end
 
 
+"""
+    replace_element!(C, ename::String, rule::Function, deps::Set{String}) -> nothing
+
+Replace an element by a constructed element produced by `rule(C)` depending on
+`deps`, preserving its dependents and triggering recomputation.
+Throws `ArgumentError` for unknown deps or if `rule(C)` throws.
+"""
 function replace_element!(C::Construction, ename::String, construct::Function, depends_on::Set{String})
     if !haskey(C.elements, ename)
         throw(ArgumentError("Element $ename not found."))
@@ -257,6 +410,12 @@ function replace_element!(C::Construction, ename::String, construct::Function, d
 end
 
 
+"""
+    @place C name value
+
+Insert a placed element and return its value. Example:
+`@place C "A" 42`.
+"""
 macro place(construction, name, representation)
     quote
         place_element!($(esc(construction)), $(esc(name)), $(esc(representation)))
@@ -264,6 +423,12 @@ macro place(construction, name, representation)
     end
 end
 
+"""
+    @modify C name newvalue
+
+Modify a placed element and return its new value. Example:
+`@modify C "A" 7`.
+"""
 macro modify(construction, name, new_representation)
     quote
         modify_placed_element!($(esc(construction)), $(esc(name)), $(esc(new_representation)))
@@ -271,6 +436,12 @@ macro modify(construction, name, new_representation)
     end
 end
 
+"""
+    make_construct(rule, deps...)
+
+Internal helper used by `@construct`/`@replace` to capture a `C -> rule(...)`
+closure over named dependencies.
+"""
 function make_construct(rule, dependencies...)
     arguments = map( d ->:(C[$(esc(d))]) , dependencies )
     quote
@@ -278,6 +449,13 @@ function make_construct(rule, dependencies...)
     end    
 end
 
+"""
+    @construct(C, name, rule, deps...)
+
+Insert a constructed element produced by `rule` applied to the values of
+`deps`. Returns the element's value. Example:
+`@construct(C, "S", +, "A", "B")` defines `S = C["A"] + C["B"]`.
+"""
 macro construct(construction, name, rule, dependencies...)
     construct = make_construct(rule, dependencies...)
     quote
@@ -286,12 +464,22 @@ macro construct(construction, name, rule, dependencies...)
     end
 end
 
+"""
+    @remove C name
+
+Remove an element and all of its dependents. Example: `@remove C "A"`.
+"""
 macro remove(construction, name)
     quote
         remove_element!($(esc(construction)), $(esc(name)))
     end
 end
 
+"""
+    @replace C name value
+
+Replace an element with a placed element holding `value`. Returns that value.
+"""
 macro replace(construction, name, representation)
     quote
         replace_element!($(esc(construction)), $(esc(name)), $(esc(representation)))
@@ -299,6 +487,12 @@ macro replace(construction, name, representation)
     end
 end
 
+"""
+    @replace(C, name, rule, deps...)
+
+Replace an element with a constructed element produced by `rule` applied to
+the values of `deps`. Returns the new value.
+"""
 macro replace(construction, name, rule, dependencies...)
     construct = make_construct(rule, dependencies...)
     quote
@@ -308,14 +502,5 @@ macro replace(construction, name, rule, dependencies...)
 end
 
 
-using Plots
-
-@recipe function construction_plot_recipe(C::Construction)
-    plotorder = dependency_order(C)
-    for en in plotorder
-        label := en
-        @series C[en]
-    end
-end
 
 end
