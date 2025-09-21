@@ -55,7 +55,14 @@ jobs:
       - uses: julia-actions/julia-buildpkg@v1
       - name: Instantiate docs environment
         run: |
-          julia --project=docs -e 'using Pkg; Pkg.develop(path=pwd()); Pkg.instantiate()'
+          julia --project=docs -e '
+            using Pkg;
+            try
+              Pkg.Registry.add("General")
+            catch
+            end;
+            Pkg.develop(path=pwd());
+            Pkg.instantiate()'
       - name: Doctest
         run: |
           julia --project=docs -e '
