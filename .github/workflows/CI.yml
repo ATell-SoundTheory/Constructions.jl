@@ -23,6 +23,7 @@ jobs:
         include:
           - os: macos-13
             version: '1.6'
+            arch: x64
         arch: [x64]
     steps:
       - uses: actions/checkout@v4
