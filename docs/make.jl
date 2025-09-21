@@ -625,8 +625,9 @@ function render_interactive_assets()
             # Save a self-contained HTML (pan/zoom interactivity)
             Makie.save($out_path, fig)
         end
-    catch
-        # Makie/WGLMakie not available or render failed; skip silently
+    catch e
+        # Makie/WGLMakie not available or render failed; log and skip
+        @warn "Interactive asset generation skipped" exception=e
         return
     end
 end
